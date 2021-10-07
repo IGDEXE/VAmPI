@@ -1,0 +1,56 @@
+# Python package
+# Create and test a Python package on multiple Python versions.
+# Add steps that analyze code, save the dist with the build record, publish to a PyPI-compatible index, and more:
+# https://docs.microsoft.com/azure/devops/pipelines/languages/python
+
+trigger:
+- master
+
+variables:
+  veracodeAppProfile: AzDevOps.$(Build.DefinitionName)
+  caminhoPacote: $(Build.ArtifactStagingDirectory)/$(Build.BuildId).zip
+  
+pool:
+  vmImage: ubuntu-latest
+strategy:
+  matrix:
+    Python27:
+      python.version: '2.7'
+    Python35:
+      python.version: '3.5'
+    Python36:
+      python.version: '3.6'
+    Python37:
+      python.version: '3.7'
+
+steps:
+- task: UsePythonVersion@0
+  inputs:
+    versionSpec: '$(python.version)'
+  displayName: 'Use Python $(python.version)'
+
+- script: |
+    python -m pip install --upgrade pip
+    pip install -r requirements.txt
+  displayName: 'Install dependencies'
+
+- task: ArchiveFiles@2
+  inputs:
+    rootFolderOrFile: '$(Agent.BuildDirectory)'
+    includeRootFolder: true
+    archiveType: 'zip'
+    archiveFile: '$(caminhoPacote)'
+    replaceExistingArchive: true
+  displayName: 'Criando pacote para analise'
+
+- task: Veracode@3
+  inputs:
+    ConnectionDetailsSelection: 'Endpoint'
+    AnalysisService: 'Veracode'
+    veracodeAppProfile: '$(veracodeAppProfile)'
+    version: '$(build.buildNumber)'
+    filepath: '$(caminhoPacote)'
+    createProfile: true
+    importResults: true
+    maximumWaitTime: '360'
+  displayName: 'Veracode SAST'
