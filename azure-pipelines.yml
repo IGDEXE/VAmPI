@@ -43,5 +43,6 @@ steps:
     filepath: '$(caminhoPacote)'
     createProfile: true
     importResults: true
+    failBuildOnPolicyFail: true
     maximumWaitTime: '360'
   displayName: 'Veracode SAST'
