@@ -7,9 +7,7 @@ trigger:
 - master
 
 variables:
-  veracodeAppProfile: AzDevOps.$(Build.DefinitionName)
-  caminhoPacote: $(Build.ArtifactStagingDirectory)/$(Build.BuildId).zip
-  python.version: '3.7'
+- group: Veracode
   
 pool:
   vmImage: ubuntu-latest
@@ -17,8 +15,10 @@ pool:
 steps:
 - task: UsePythonVersion@0
   inputs:
-    versionSpec: '$(python.version)'
-  displayName: 'Use Python $(python.version)'
+    versionSpec: '3.7'
+    addToPath: true
+    architecture: 'x64'
+  displayName: 'Use Python 3.7'
 
 - script: |
     python -m pip install --upgrade pip
@@ -37,7 +37,7 @@ steps:
 - task: Veracode@3
   inputs:
     ConnectionDetailsSelection: 'Endpoint'
-    AnalysisService: 'Veracode'
+    AnalysisService: 'veracode-evento'
     veracodeAppProfile: '$(veracodeAppProfile)'
     version: '$(build.buildNumber)'
     filepath: '$(caminhoPacote)'
