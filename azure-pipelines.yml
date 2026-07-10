@@ -167,7 +167,7 @@ steps:
     displayName: 'Download Veracode Wrapper'
 
   - script: |
-      if [ "$(Build.SourceBranchName)" == "main" ]; then
+      if [[ "$(Build.SourceBranchName)" == "main" || "$(Build.SourceBranchName)" == "master" ]]; then
         java -jar veracode-wrapper.jar \
           -vid $(VERACODE_API_KEY_ID) \
           -vkey $(VERACODE_API_KEY_SECRET) \
