@@ -159,8 +159,9 @@ steps:
     displayName: 'Preparar pacote Veracode unificado'
 
   - script: |
-      LATEST_VERSION=$(curl -s https://repo1.maven.org/maven2/com/veracode/vosp/api/wrappers/vosp-api-wrappers-java/maven-metadata.xml \
-        | grep -oPm1 "(?<=<latest>)[^<]+")
+      LATEST_VERSION=$(curl -s \
+        https://repo1.maven.org/maven2/com/veracode/vosp/api/wrappers/vosp-api-wrappers-java/maven-metadata.xml |
+        grep -oPm1 "(?<=<latest>)[^<]+")
 
       curl -L \
         -o veracode-wrapper.jar \
@@ -168,11 +169,13 @@ steps:
     displayName: 'Download Veracode Wrapper'
 
   - script: |
+      set -euo pipefail
+
       APP_ID=$(java -jar veracode-wrapper.jar \
-        -vid "$(VG_VERACODE_API_KEY_ID)" \
-        -vkey "$(VG_VERACODE_API_KEY_SECRET)" \
+        -vid "$(APIID)" \
+        -vkey "$(APIKEY)" \
         -action getapplist |
-        awk -v app="$(vg_applicationName)" '
+        awk -v app="$(veracodeAppProfile)" '
           BEGIN {
             RS = ">"
           }
@@ -183,14 +186,17 @@ steps:
           }
         ')
 
-      [ -n "$APP_ID" ] || {
-        echo "Aplicacao nao encontrada"
+      if [ -z "$APP_ID" ]; then
+        echo "Aplicacao nao encontrada: $(veracodeAppProfile)"
         exit 1
-      }
+      fi
+
+      echo "Aplicacao: $(veracodeAppProfile)"
+      echo "App ID: $APP_ID"
 
       SANDBOX_XML=$(java -jar veracode-wrapper.jar \
-        -vid "$(VG_VERACODE_API_KEY_ID)" \
-        -vkey "$(VG_VERACODE_API_KEY_SECRET)" \
+        -vid "$(APIID)" \
+        -vkey "$(APIKEY)" \
         -action getsandboxlist \
         -appid "$APP_ID")
 
@@ -209,7 +215,10 @@ steps:
           }
         ')
 
+      echo "Quantidade de sandboxes: $SANDBOX_COUNT"
+
       if [ "$SANDBOX_COUNT" -ge 8 ]; then
+
         OLDEST_ID=$(printf '%s\n' "$SANDBOX_XML" |
           awk '
             BEGIN {
@@ -229,45 +238,53 @@ steps:
           head -n 1 |
           awk -F '\t' '{ print $2 }')
 
-        [ -n "$OLDEST_ID" ] || {
+        if [ -z "$OLDEST_ID" ]; then
           echo "Sandbox mais antiga nao encontrada"
           exit 1
-        }
+        fi
 
         echo "Removendo sandbox ID: $OLDEST_ID"
 
         java -jar veracode-wrapper.jar \
-          -vid "$(VG_VERACODE_API_KEY_ID)" \
-          -vkey "$(VG_VERACODE_API_KEY_SECRET)" \
+          -vid "$(APIID)" \
+          -vkey "$(APIKEY)" \
           -action deletesandbox \
           -sandboxid "$OLDEST_ID"
+
+      else
+        echo "Nenhuma limpeza necessaria."
       fi
+
     displayName: 'Veracode - limpar sandbox'
     condition: and(succeeded(), ne(variables['Build.SourceBranchName'], 'main'))
 
   - script: |
-      if [ "$(Build.SourceBranchName)" = "catatau" ]; then
+      if [ "$(Build.SourceBranchName)" = "main" ]; then
+
         java -jar veracode-wrapper.jar \
-          -vid "$(VG_VERACODE_API_KEY_ID)" \
-          -vkey "$(VG_VERACODE_API_KEY_SECRET)" \
+          -vid "$(APIID)" \
+          -vkey "$(APIKEY)" \
           -action uploadandscan \
-          -appname "$(vg_applicationName)" \
+          -appname "$(veracodeAppProfile)" \
           -createprofile true \
           -version "$(Build.BuildNumber)" \
-          -filepath "$(Build.SourcesDirectory)/$(vg_applicationName).zip" \
+          -filepath "$(Build.SourcesDirectory)/$(veracodeAppProfile).zip" \
           -deleteincompletescan 2
+
       else
+
         java -jar veracode-wrapper.jar \
-          -vid "$(VG_VERACODE_API_KEY_ID)" \
-          -vkey "$(VG_VERACODE_API_KEY_SECRET)" \
+          -vid "$(APIID)" \
+          -vkey "$(APIKEY)" \
           -action uploadandscan \
-          -appname "$(vg_applicationName)" \
+          -appname "$(veracodeAppProfile)" \
           -createprofile true \
           -version "$(Build.BuildNumber)" \
-          -filepath "$(Build.SourcesDirectory)/$(vg_applicationName).zip" \
+          -filepath "$(Build.SourcesDirectory)/$(veracodeAppProfile).zip" \
           -createsandbox true \
           -sandboxname "$(Build.SourceBranchName)" \
           -deleteincompletescan 2
+
       fi
     displayName: 'Veracode U&S'
 
