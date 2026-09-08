@@ -217,7 +217,7 @@ steps:
 
       echo "Quantidade de sandboxes: $SANDBOX_COUNT"
 
-      if [ "$SANDBOX_COUNT" -ge 8 ]; then
+      if [ "$SANDBOX_COUNT" -ge 3 ]; then
 
         OLDEST_ID=$(printf '%s\n' "$SANDBOX_XML" |
           awk '
