@@ -259,7 +259,7 @@ steps:
     condition: and(succeeded(), ne(variables['Build.SourceBranchName'], 'main'))
 
   - script: |
-      if [ "$(Build.SourceBranchName)" = "main" ]; then
+      if [ "$(Build.SourceBranchName)" = "catatau" ]; then
 
         java -jar veracode-wrapper.jar \
           -vid "$(APIID)" \
@@ -268,7 +268,7 @@ steps:
           -appname "$(veracodeAppProfile)" \
           -createprofile true \
           -version "$(Build.BuildNumber)" \
-          -filepath "$(Build.SourcesDirectory)/$(veracodeAppProfile).zip" \
+          -filepath "$(caminhoPacote)" \
           -deleteincompletescan 2
 
       else
@@ -280,7 +280,7 @@ steps:
           -appname "$(veracodeAppProfile)" \
           -createprofile true \
           -version "$(Build.BuildNumber)" \
-          -filepath "$(Build.SourcesDirectory)/$(veracodeAppProfile).zip" \
+          -filepath "$(caminhoPacote)" \
           -createsandbox true \
           -sandboxname "$(Build.SourceBranchName)" \
           -deleteincompletescan 2
