@@ -43,6 +43,7 @@ steps:
       trap 'rm -rf "$TEMP_DIR"' EXIT
 
       echo "Copiando arquivos fonte..."
+
       find . -type f \
         \( \
           -iname "*.py" -o \
@@ -88,6 +89,7 @@ steps:
         -exec cp --parents {} "$TEMP_DIR" \;
 
       echo "Selecionando assemblies .NET com PDB..."
+
       declare -A SELECTED_DLL
       declare -A SELECTED_SCORE
 
@@ -157,45 +159,125 @@ steps:
     displayName: 'Preparar pacote Veracode unificado'
 
   - script: |
-      LATEST_VERSION=$(curl -s https://repo1.maven.org/maven2/com/veracode/vosp/api/wrappers/vosp-api-wrappers-java/maven-metadata.xml | grep -oPm1 "(?<=<latest>)[^<]+")
-      curl -L -o veracode-wrapper.jar "https://repo1.maven.org/maven2/com/veracode/vosp/api/wrappers/vosp-api-wrappers-java/${LATEST_VERSION}/vosp-api-wrappers-java-${LATEST_VERSION}.jar"
+      LATEST_VERSION=$(curl -s https://repo1.maven.org/maven2/com/veracode/vosp/api/wrappers/vosp-api-wrappers-java/maven-metadata.xml \
+        | grep -oPm1 "(?<=<latest>)[^<]+")
+
+      curl -L \
+        -o veracode-wrapper.jar \
+        "https://repo1.maven.org/maven2/com/veracode/vosp/api/wrappers/vosp-api-wrappers-java/${LATEST_VERSION}/vosp-api-wrappers-java-${LATEST_VERSION}.jar"
     displayName: 'Download Veracode Wrapper'
 
   - script: |
-      if [[ "$(Build.SourceBranchName)" == "main" || "$(Build.SourceBranchName)" == "master" ]]; then
+      APP_ID=$(java -jar veracode-wrapper.jar \
+        -vid "$(VG_VERACODE_API_KEY_ID)" \
+        -vkey "$(VG_VERACODE_API_KEY_SECRET)" \
+        -action getapplist |
+        awk -v app="$(vg_applicationName)" '
+          BEGIN {
+            RS = ">"
+          }
+          index($0, "<app ") && index($0, "app_name=\"" app "\"") {
+            match($0, /app_id="[^"]+"/)
+            print substr($0, RSTART + 8, RLENGTH - 9)
+            exit
+          }
+        ')
+
+      [ -n "$APP_ID" ] || {
+        echo "Aplicacao nao encontrada"
+        exit 1
+      }
+
+      SANDBOX_XML=$(java -jar veracode-wrapper.jar \
+        -vid "$(VG_VERACODE_API_KEY_ID)" \
+        -vkey "$(VG_VERACODE_API_KEY_SECRET)" \
+        -action getsandboxlist \
+        -appid "$APP_ID")
+
+      printf '%s\n' "$SANDBOX_XML"
+
+      SANDBOX_COUNT=$(printf '%s\n' "$SANDBOX_XML" |
+        awk '
+          BEGIN {
+            RS = ">"
+          }
+          /<sandbox[[:space:]]/ {
+            count += 1
+          }
+          END {
+            print count + 0
+          }
+        ')
+
+      if [ "$SANDBOX_COUNT" -ge 8 ]; then
+        OLDEST_ID=$(printf '%s\n' "$SANDBOX_XML" |
+          awk '
+            BEGIN {
+              RS = ">"
+            }
+            /<sandbox[[:space:]]/ {
+              match($0, /sandbox_id="[^"]+"/)
+              id = substr($0, RSTART + 12, RLENGTH - 13)
+
+              match($0, /last_modified="[^"]+"/)
+              date = substr($0, RSTART + 15, RLENGTH - 16)
+
+              print date "\t" id
+            }
+          ' |
+          sort |
+          head -n 1 |
+          awk -F '\t' '{ print $2 }')
+
+        [ -n "$OLDEST_ID" ] || {
+          echo "Sandbox mais antiga nao encontrada"
+          exit 1
+        }
+
+        echo "Removendo sandbox ID: $OLDEST_ID"
+
         java -jar veracode-wrapper.jar \
-          -vid $(VERACODE_API_KEY_ID) \
-          -vkey $(VERACODE_API_KEY_SECRET) \
+          -vid "$(VG_VERACODE_API_KEY_ID)" \
+          -vkey "$(VG_VERACODE_API_KEY_SECRET)" \
+          -action deletesandbox \
+          -sandboxid "$OLDEST_ID"
+      fi
+    displayName: 'Veracode - limpar sandbox'
+    condition: and(succeeded(), ne(variables['Build.SourceBranchName'], 'main'))
+
+  - script: |
+      if [ "$(Build.SourceBranchName)" = "catatau" ]; then
+        java -jar veracode-wrapper.jar \
+          -vid "$(VG_VERACODE_API_KEY_ID)" \
+          -vkey "$(VG_VERACODE_API_KEY_SECRET)" \
           -action uploadandscan \
-          -appname "$(Build.DefinitionName)" \
+          -appname "$(vg_applicationName)" \
           -createprofile true \
-          -version $(Build.BuildNumber) \
-          -filepath $(caminhoPacote) \
-          -deleteincompletescan 2 \
-          -teams "$(veracodeTeams)"
+          -version "$(Build.BuildNumber)" \
+          -filepath "$(Build.SourcesDirectory)/$(vg_applicationName).zip" \
+          -deleteincompletescan 2
       else
         java -jar veracode-wrapper.jar \
-          -vid $(VERACODE_API_KEY_ID) \
-          -vkey $(VERACODE_API_KEY_SECRET) \
+          -vid "$(VG_VERACODE_API_KEY_ID)" \
+          -vkey "$(VG_VERACODE_API_KEY_SECRET)" \
           -action uploadandscan \
-          -appname "$(Build.DefinitionName)" \
+          -appname "$(vg_applicationName)" \
           -createprofile true \
-          -version $(Build.BuildNumber) \
-          -filepath $(caminhoPacote) \
+          -version "$(Build.BuildNumber)" \
+          -filepath "$(Build.SourcesDirectory)/$(vg_applicationName).zip" \
           -createsandbox true \
           -sandboxname "$(Build.SourceBranchName)" \
-          -deleteincompletescan 2 \
-          -teams "$(veracodeTeams)"
+          -deleteincompletescan 2
       fi
     displayName: 'Veracode U&S'
-    continueOnError: true
 
   - script: |
       curl -fsS https://tools.veracode.com/veracode-cli/install | sh
     displayName: 'Download Veracode CLI'
 
   - script: |
-      curl -sSL https://download.srcclr.com/ci.sh | bash -s -- scan --update-advisor --allow-dirty --recursive
+      curl -sSL https://download.srcclr.com/ci.sh |
+        bash -s -- scan --update-advisor --allow-dirty --recursive
     displayName: 'Veracode SCA'
     continueOnError: true
 
