@@ -282,7 +282,7 @@ steps:
           -version "$(Build.BuildNumber)" \
           -filepath "$(caminhoPacote)" \
           -createsandbox true \
-          -sandboxname "$(Build.SourceBranchName)" \
+          -sandboxname "$(Build.SourceBranchName).$(Build.BuildNumber)" \
           -deleteincompletescan 2
 
       fi
