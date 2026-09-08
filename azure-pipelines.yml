@@ -187,8 +187,8 @@ steps:
         ')
 
       if [ -z "$APP_ID" ]; then
-        echo "Aplicacao nao encontrada: $(veracodeAppProfile)"
-        exit 1
+        echo "Aplicacao nao encontrada; pulando limpeza de sandbox"
+        exit 0
       fi
 
       echo "Aplicacao: $(veracodeAppProfile)"
