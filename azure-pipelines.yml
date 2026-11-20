@@ -5,323 +5,237 @@
 # https://docs.microsoft.com/azure/devops/pipelines/languages/python
 
 trigger:
-  - master
+- master
 
 variables:
-  - group: Veracode
+- group: Veracode
+- name: caminhoPacote
+  value: '$(Build.ArtifactStagingDirectory)\veracode-package.zip'
+- name: veracodeTeams
+  value: 'DEMOs'
 
 pool:
-  vmImage: ubuntu-latest
+  vmImage: 'windows-latest'
 
 steps:
-  - task: UsePythonVersion@0
-    displayName: 'Use Python 3.10'
-    inputs:
-      versionSpec: '3.10'
-      addToPath: true
-      architecture: 'x64'
+- task: UsePythonVersion@0
+  displayName: 'Use Python 3.10'
+  inputs:
+    versionSpec: '3.10'
+    addToPath: true
+    architecture: 'x64'
 
-  - script: |
-      python -m pip install --upgrade pip
-      pip install -r requirements.txt
-    displayName: 'Install dependencies'
+- script: |
+    python -m pip install --upgrade pip
+    pip install -r requirements.txt
+  displayName: 'Install dependencies'
 
-  - script: |
-      set -euo pipefail
+- task: PowerShell@2
+  displayName: 'Preparar pacote Veracode unificado (ZIP otimizado)'
+  inputs:
+    targetType: 'inline'
+    script: |
+      $ErrorActionPreference = "Stop"
 
-      ORIGINAL_DIR=$(pwd)
-      PACKAGE_PATH="$(caminhoPacote)"
+      $sourcePath = (Get-Location).Path
+      $destPath = "$(caminhoPacote)"
+      $destDir = Split-Path -Path $destPath -Parent
 
-      if [[ "$PACKAGE_PATH" != /* ]]; then
-        PACKAGE_PATH="$ORIGINAL_DIR/$PACKAGE_PATH"
-      fi
+      if (-not (Test-Path -LiteralPath $destDir)) {
+        New-Item -Path $destDir -ItemType Directory -Force | Out-Null
+      }
 
-      mkdir -p "$(dirname "$PACKAGE_PATH")"
-      rm -f "$PACKAGE_PATH"
+      if (Test-Path -LiteralPath $destPath) {
+        Remove-Item -LiteralPath $destPath -Force
+      }
 
-      TEMP_DIR=$(mktemp -d)
-      trap 'rm -rf "$TEMP_DIR"' EXIT
+      $tempDir = Join-Path $env:TEMP ("VeracodeZip_" + [guid]::NewGuid().ToString())
+      New-Item -Path $tempDir -ItemType Directory -Force | Out-Null
 
-      echo "Copiando arquivos fonte..."
-
-      find . -type f \
-        \( \
-          -iname "*.py" -o \
-          -iname "*.html" -o \
-          -iname "*.htm" -o \
-          -iname "*.asp" -o \
-          -iname "*.cjs" -o \
-          -iname "*.css" -o \
-          -iname "*.ehtml" -o \
-          -iname "*.es" -o \
-          -iname "*.es6" -o \
-          -iname "*.handlebars" -o \
-          -iname "*.hbs" -o \
-          -iname "*.hjs" -o \
-          -iname "*.js" -o \
-          -iname "*.jsx" -o \
-          -iname "*.json" -o \
-          -iname "*.jsp" -o \
-          -iname "*.jspx" -o \
-          -iname "*.java" -o \
-          -iname "*.map" -o \
-          -iname "*.mjs" -o \
-          -iname "*.mustache" -o \
-          -iname "*.ts" -o \
-          -iname "*.tsx" -o \
-          -iname "*.vue" -o \
-          -iname "*.xhtml" -o \
-          -iname "*.lock" -o \
-          -iname "*.module" -o \
-          -iname "*.inc" -o \
-          -iname "*.profile" -o \
-          -iname "*.install" -o \
-          -iname "*.engine" -o \
-          -iname "*.theme" -o \
-          -iname "*.php4" -o \
-          -iname "*.php5" -o \
-          -iname "*.php7" -o \
-          -iname "*.phtml" -o \
-          -iname "*.txt" \
-        \) \
-        ! -path "*/node_modules/*" \
-        ! -path "*/.git/*" \
-        -exec cp --parents {} "$TEMP_DIR" \;
-
-      echo "Selecionando assemblies .NET com PDB..."
-
-      declare -A SELECTED_DLL
-      declare -A SELECTED_SCORE
-
-      while IFS= read -r -d '' dllFile; do
-        pdbFile="${dllFile%.dll}.pdb"
-
-        if [[ ! -f "$pdbFile" ]]; then
-          continue
-        fi
-
-        dllName=$(basename "$dllFile")
-        dllKey=$(printf '%s' "$dllName" | tr '[:upper:]' '[:lower:]')
-        dllMtime=$(stat -c %Y "$dllFile")
-        pathScore=0
-
-        case "$dllFile" in
-          */bin/Release/*|*/bin/release/*)
-            pathScore=2
-            ;;
-          */bin/*)
-            pathScore=1
-            ;;
-        esac
-
-        score="${pathScore}${dllMtime}"
-
-        if [[ -z "${SELECTED_SCORE[$dllKey]+x}" || "$score" -gt "${SELECTED_SCORE[$dllKey]}" ]]; then
-          SELECTED_DLL[$dllKey]="$dllFile"
-          SELECTED_SCORE[$dllKey]="$score"
-        fi
-      done < <(
-        find . -type f -name "*.dll" \
-          ! -iname "*Microsoft*" \
-          ! -iname "*UnitTest*" \
-          ! -iname "*Xunit*" \
-          ! -iname "*Test*" \
-          ! -path "*/obj/*" \
-          ! -path "*/ref/*" \
-          ! -path "*/refint/*" \
-          ! -path "*/node_modules/*" \
-          ! -path "*/.git/*" \
-          ! -path "*/TestResults/*" \
-          -print0
+      # Mesma lista de inclusões (-i) do ZIP otimizado
+      $includePatterns = @(
+        '*.py', '*.html', '*.htm', '*.asp', '*.cjs', '*.css', '*.ehtml', '*.es', '*.es6',
+        '*.handlebars', '*.hbs', '*.hjs', '*.js', '*.jsx', '*.json', '*.jsp', '*.jspx',
+        '*.java', '*.map', '*.mjs', '*.mustache', '*.ts', '*.tsx', '*.vue', '*.xhtml',
+        '*.lock', '*.module', '*.inc', '*.profile', '*.install', '*.engine', '*.theme',
+        '*.php', '*.php4', '*.php5', '*.php7', '*.phtml', '*.txt',
+        'pyproject.toml', 'Pipfile', 'Pipfile.lock', 'composer.lock',
+        '*.cs', '*.cshtml', '*.razor', '*.csproj', '*.sln', '*.slnx', '*.props', '*.targets',
+        '*.config', '*.deps.json', '*.asset.json',
+        '*.cob', '*.cbl', '*.cobol', '*.pco', '*.cpy',
+        '*.cls', '*.trg', '*.tgr', '*.trigger', '*.pks', '*.pkb', '*.vfp', '*.cmp',
+        '*.component', '*.evt', '*.app', '*.page', '*.fnc', '*.pck', '*.pls', '*.prc',
+        '*.sql', '*.tpb', '*.tps', '*.vw',
+        '*.bas', '*.frm', '*.frx', '*.ctl', '*.ctx', '*.vbp', '*.vbg', '*.vb', '*.vbs',
+        '*.asa', '*.grp', '*.ocx',
+        '*.rpg', '*.rpg4', '*.rpgle', '*.pf', '*.lf', '*.dspf', '*.prt', '*.icf',
+        '*.sc', '*.scala', '*.groovy', '*.gvy', '*.gy', '*.gsh',
+        '*.pl', '*.pm', '*.plx', '*.pl5', '*.cgi', '*.go',
+        'go.mod', 'go.sum', 'veracode.json'
       )
 
-      for dllKey in "${!SELECTED_DLL[@]}"; do
-        dllFile="${SELECTED_DLL[$dllKey]}"
-        pdbFile="${dllFile%.dll}.pdb"
+      # Mesma lista de exclusões (-x) do ZIP otimizado
+      $excludeDirsRegex = '\\(node_modules|\.git|dist|bin|obj|packages|\.vscode|\.idea|test|tests|__tests__)\\'
+      $excludeTestFilesRegex = '(_test\.|_spec\.|Test\.|Tests\.)'
 
-        cp --parents "$dllFile" "$TEMP_DIR"
-        cp --parents "$pdbFile" "$TEMP_DIR"
+      $matchedFiles = Get-ChildItem -LiteralPath $sourcePath -File -Recurse | Where-Object {
+        if ($_.FullName -match $excludeDirsRegex) { return $false }
+        if ($_.Name -match $excludeTestFilesRegex) { return $false }
 
-        for ext in deps.json runtimeconfig.json; do
-          auxFile="${dllFile%.dll}.${ext}"
-          [ -f "$auxFile" ] && cp --parents "$auxFile" "$TEMP_DIR"
-        done
+        foreach ($pat in $includePatterns) {
+          if ($_.Name -like $pat) { return $true }
+        }
+        return $false
+      }
 
-        webConfig="$(dirname "$dllFile")/web.config"
-        [ -f "$webConfig" ] && cp --parents "$webConfig" "$TEMP_DIR"
-      done
+      foreach ($file in $matchedFiles) {
+        $relPath = $file.FullName.Substring($sourcePath.Length).TrimStart('\')
+        $targetFile = Join-Path $tempDir $relPath
+        $targetParent = Split-Path -Path $targetFile -Parent
 
-      cd "$TEMP_DIR"
-      zip -r "$PACKAGE_PATH" .
+        if (-not (Test-Path -LiteralPath $targetParent)) {
+          New-Item -Path $targetParent -ItemType Directory -Force | Out-Null
+        }
+        Copy-Item -LiteralPath $file.FullName -Destination $targetFile -Force
+      }
 
-      echo "ZIP criado:"
-      ls -lh "$PACKAGE_PATH"
-    displayName: 'Preparar pacote Veracode unificado'
+      Add-Type -AssemblyName System.IO.Compression.FileSystem
+      [System.IO.Compression.ZipFile]::CreateFromDirectory($tempDir, $destPath, [System.IO.Compression.CompressionLevel]::Optimal, $false)
+      Remove-Item -LiteralPath $tempDir -Recurse -Force
 
-  - script: |
-      LATEST_VERSION=$(curl -s \
-        https://repo1.maven.org/maven2/com/veracode/vosp/api/wrappers/vosp-api-wrappers-java/maven-metadata.xml |
-        grep -oPm1 "(?<=<latest>)[^<]+")
+      Write-Host "ZIP criado:"
+      Get-Item -LiteralPath $destPath | Select-Object FullName, @{Name="SizeMB";Expression={[math]::Round($_.Length / 1MB, 2)}}
 
-      curl -L \
-        -o veracode-wrapper.jar \
-        "https://repo1.maven.org/maven2/com/veracode/vosp/api/wrappers/vosp-api-wrappers-java/${LATEST_VERSION}/vosp-api-wrappers-java-${LATEST_VERSION}.jar"
-    displayName: 'Download Veracode Wrapper'
+- task: PowerShell@2
+  displayName: 'Download Veracode Wrapper'
+  inputs:
+    targetType: 'inline'
+    script: |
+      $ErrorActionPreference = "Stop"
+      [xml]$meta = Invoke-RestMethod -Uri "https://repo1.maven.org/maven2/com/veracode/vosp/api/wrappers/vosp-api-wrappers-java/maven-metadata.xml"
+      $latestVersion = $meta.metadata.versioning.latest
+      $jarUrl = "https://repo1.maven.org/maven2/com/veracode/vosp/api/wrappers/vosp-api-wrappers-java/$latestVersion/vosp-api-wrappers-java-$latestVersion.jar"
+      Invoke-WebRequest -Uri $jarUrl -OutFile "veracode-wrapper.jar"
 
-  - script: |
-      set -euo pipefail
+- task: PowerShell@2
+  displayName: 'Veracode - limpar sandbox'
+  condition: and(succeeded(), ne(variables['Build.SourceBranchName'], 'main'))
+  inputs:
+    targetType: 'inline'
+    script: |
+      $ErrorActionPreference = "Stop"
 
-      APP_ID=$(java -jar veracode-wrapper.jar \
-        -vid "$(APIID)" \
-        -vkey "$(APIKEY)" \
-        -action getapplist |
-        awk -v app="$(veracodeAppProfile)" '
-          BEGIN {
-            RS = ">"
-          }
-          index($0, "<app ") && index($0, "app_name=\"" app "\"") {
-            match($0, /app_id="[^"]+"/)
-            print substr($0, RSTART + 8, RLENGTH - 9)
-            exit
-          }
-        ')
+      $appName = "$(veracodeAppProfile)"
+      $appListXml = java -jar veracode-wrapper.jar -vid "$(APIID)" -vkey "$(APIKEY)" -action getapplist
+      [xml]$appsDoc = $appListXml
 
-      if [ -z "$APP_ID" ]; then
-        echo "Aplicacao nao encontrada; pulando limpeza de sandbox"
+      $appNode = $appsDoc.SelectSingleNode("//app[@app_name='$appName']")
+      if ($null -eq $appNode) {
+        Write-Host "Aplicacao nao encontrada; pulando limpeza de sandbox"
         exit 0
-      fi
+      }
 
-      echo "Aplicacao: $(veracodeAppProfile)"
-      echo "App ID: $APP_ID"
+      $appId = $appNode.app_id
+      Write-Host "Aplicacao: $appName"
+      Write-Host "App ID: $appId"
 
-      SANDBOX_XML=$(java -jar veracode-wrapper.jar \
-        -vid "$(APIID)" \
-        -vkey "$(APIKEY)" \
-        -action getsandboxlist \
-        -appid "$APP_ID")
+      $sandboxXml = java -jar veracode-wrapper.jar -vid "$(APIID)" -vkey "$(APIKEY)" -action getsandboxlist -appid $appId
+      Write-Output $sandboxXml
 
-      printf '%s\n' "$SANDBOX_XML"
+      [xml]$sbDoc = $sandboxXml
+      $sandboxes = @($sbDoc.SelectNodes("//sandbox"))
+      Write-Host "Quantidade de sandboxes: $($sandboxes.Count)"
 
-      SANDBOX_COUNT=$(printf '%s\n' "$SANDBOX_XML" |
-        awk '
-          BEGIN {
-            RS = ">"
-          }
-          /<sandbox[[:space:]]/ {
-            count += 1
-          }
-          END {
-            print count + 0
-          }
-        ')
-
-      echo "Quantidade de sandboxes: $SANDBOX_COUNT"
-
-      if [ "$SANDBOX_COUNT" -ge 3 ]; then
-
-        OLDEST_ID=$(printf '%s\n' "$SANDBOX_XML" |
-          awk '
-            BEGIN {
-              RS = ">"
-            }
-            /<sandbox[[:space:]]/ {
-              match($0, /sandbox_id="[^"]+"/)
-              id = substr($0, RSTART + 12, RLENGTH - 13)
-
-              match($0, /last_modified="[^"]+"/)
-              date = substr($0, RSTART + 15, RLENGTH - 16)
-
-              print date "\t" id
-            }
-          ' |
-          sort |
-          head -n 1 |
-          awk -F '\t' '{ print $2 }')
-
-        if [ -z "$OLDEST_ID" ]; then
-          echo "Sandbox mais antiga nao encontrada"
+      if ($sandboxes.Count -ge 3) {
+        $oldest = $sandboxes | Sort-Object { $_.last_modified } | Select-Object -First 1
+        if ($null -eq $oldest -or [string]::IsNullOrWhiteSpace($oldest.sandbox_id)) {
+          Write-Error "Sandbox mais antiga nao encontrada"
           exit 1
-        fi
+        }
 
-        echo "Removendo sandbox ID: $OLDEST_ID"
+        Write-Host "Removendo sandbox ID: $($oldest.sandbox_id)"
+        java -jar veracode-wrapper.jar -vid "$(APIID)" -vkey "$(APIKEY)" -action deletesandbox -sandboxid $oldest.sandbox_id
+      } else {
+        Write-Host "Nenhuma limpeza necessaria."
+      }
 
-        java -jar veracode-wrapper.jar \
-          -vid "$(APIID)" \
-          -vkey "$(APIKEY)" \
-          -action deletesandbox \
-          -sandboxid "$OLDEST_ID"
+- task: PowerShell@2
+  displayName: 'Veracode U&S'
+  inputs:
+    targetType: 'inline'
+    script: |
+      $ErrorActionPreference = "Stop"
 
-      else
-        echo "Nenhuma limpeza necessaria."
-      fi
-
-    displayName: 'Veracode - limpar sandbox'
-    condition: and(succeeded(), ne(variables['Build.SourceBranchName'], 'main'))
-
-  - script: |
-      if [ "$(Build.SourceBranchName)" = "catatau" ]; then
-
-        java -jar veracode-wrapper.jar \
-          -vid "$(APIID)" \
-          -vkey "$(APIKEY)" \
-          -action uploadandscan \
-          -appname "$(veracodeAppProfile)" \
-          -createprofile true \
-          -version "$(Build.BuildNumber)" \
-          -filepath "$(caminhoPacote)" \
+      if ("$(Build.SourceBranchName)" -eq "catatau") {
+        java -jar veracode-wrapper.jar `
+          -vid "$(APIID)" `
+          -vkey "$(APIKEY)" `
+          -action uploadandscan `
+          -appname "$(veracodeAppProfile)" `
+          -createprofile true `
+          -version "$(Build.BuildNumber)" `
+          -filepath "$(caminhoPacote)" `
+          -teams "$(veracodeTeams)" `
           -deleteincompletescan 2
-
-      else
-
-        java -jar veracode-wrapper.jar \
-          -vid "$(APIID)" \
-          -vkey "$(APIKEY)" \
-          -action uploadandscan \
-          -appname "$(veracodeAppProfile)" \
-          -createprofile true \
-          -version "$(Build.BuildNumber)" \
-          -filepath "$(caminhoPacote)" \
-          -createsandbox true \
-          -sandboxname "$(Build.SourceBranchName).$(Build.BuildNumber)" \
+      } else {
+        java -jar veracode-wrapper.jar `
+          -vid "$(APIID)" `
+          -vkey "$(APIKEY)" `
+          -action uploadandscan `
+          -appname "$(veracodeAppProfile)" `
+          -createprofile true `
+          -version "$(Build.BuildNumber)" `
+          -filepath "$(caminhoPacote)" `
+          -createsandbox true `
+          -sandboxname "$(Build.SourceBranchName).$(Build.BuildNumber)" `
+          -teams "$(veracodeTeams)" `
           -deleteincompletescan 2
+      }
 
-      fi
-    displayName: 'Veracode U&S'
+- task: PowerShell@2
+  displayName: 'Download Veracode CLI'
+  inputs:
+    targetType: 'inline'
+    script: |
+      $ErrorActionPreference = "Stop"
+      Invoke-WebRequest -Uri "https://tools.veracode.com/veracode-cli/veracode-cli_latest_windows_x86_64.zip" -OutFile "veracode-cli.zip"
+      Expand-Archive -Path "veracode-cli.zip" -DestinationPath ".\veracode-cli" -Force
+      Write-Host "##vso[task.prependpath]$(System.DefaultWorkingDirectory)\veracode-cli"
 
-  - script: |
-      curl -fsS https://tools.veracode.com/veracode-cli/install | sh
-    displayName: 'Download Veracode CLI'
+- script: |
+    curl -sSL https://download.srcclr.com/ci.sh | bash -s -- scan --appname="$(veracodeAppProfile)" --update-advisor --allow-dirty --recursive
+  displayName: 'Veracode SCA'
+  continueOnError: true
 
-  - script: |
-      curl -sSL https://download.srcclr.com/ci.sh |
-        bash -s -- scan --update-advisor --allow-dirty --recursive
-    displayName: 'Veracode SCA'
-    continueOnError: true
+- task: PowerShell@2
+  displayName: 'Veracode IaC'
+  continueOnError: true
+  inputs:
+    targetType: 'inline'
+    script: |
+      $originalDir = (Get-Location).Path
+      $parentDir = Split-Path -Path $originalDir -Parent
+      $originalName = Split-Path -Path $originalDir -Leaf
+      $pipelineDir = Join-Path $parentDir "$(Build.DefinitionName)"
 
-  - script: |
-      ORIGINAL_DIR=$(pwd)
-      PARENT_DIR=$(dirname "$ORIGINAL_DIR")
-      ORIGINAL_NAME=$(basename "$ORIGINAL_DIR")
-      PIPELINE_DIR="$(Build.DefinitionName)"
+      if ($originalDir -ne $pipelineDir) {
+        if (Test-Path -LiteralPath $pipelineDir) { Remove-Item -LiteralPath $pipelineDir -Recurse -Force }
+        Move-Item -LiteralPath $originalDir -Destination $pipelineDir
+        Set-Location -Path $pipelineDir
+      }
 
-      cd "$PARENT_DIR"
-      mv "$ORIGINAL_NAME" "$PIPELINE_DIR"
-      cd "$PIPELINE_DIR"
+      Write-Host "pasta: $((Get-Location).Path)"
+      veracode.exe scan --type directory --source "$((Get-Location).Path)" --format table
 
-      echo "pasta: $(pwd)"
+      if ((Get-Location).Path -ne $originalDir) {
+        Set-Location -Path $parentDir
+        if (Test-Path -LiteralPath $pipelineDir) {
+          Move-Item -LiteralPath $pipelineDir -Destination $originalDir
+        }
+        Set-Location -Path $originalDir
+      }
 
-      ./veracode scan \
-        --type directory \
-        --source "$(pwd)" \
-        --format table
-
-      cd "$PARENT_DIR"
-      mv "$PIPELINE_DIR" "$ORIGINAL_NAME"
-      cd "$ORIGINAL_DIR"
-    displayName: 'Veracode IaC'
-    continueOnError: true
-
-  - script: |
-      ./veracode static scan "$(caminhoPacote)"
-    displayName: 'Veracode SAST'
-    continueOnError: true
+- script: |
+    veracode.exe static scan "$(caminhoPacote)"
+  displayName: 'Veracode SAST'
+  continueOnError: true
