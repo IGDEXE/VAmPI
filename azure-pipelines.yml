@@ -108,11 +108,12 @@ steps:
       }
       curl.exe -fsSL -o "veracode-wrapper.jar" "https://repo1.maven.org/maven2/com/veracode/vosp/api/wrappers/vosp-api-wrappers-java/$latestVersion/vosp-api-wrappers-java-$latestVersion.jar"
 
-- script: |
-    if [[ "$(Build.SourceBranchName)" == "main" || "$(Build.SourceBranchName)" == "master" ]]; then
-        java -jar veracode-wrapper.jar -vid $(VERACODE_API_KEY_ID) -vkey $(VERACODE_API_KEY_SECRET) -action uploadandscan -appname "$(Build.DefinitionName)" -createprofile true  -version $(build.buildNumber) -filepath $(caminhoPacote) -deleteincompletescan 2 -teams "$(veracodeTeams)"
-      else
-        java -jar veracode-wrapper.jar -vid $(VERACODE_API_KEY_ID) -vkey $(VERACODE_API_KEY_SECRET) -action uploadandscan -appname "$(Build.DefinitionName)" -createprofile true  -version $(build.buildNumber) -filepath $(caminhoPacote) -createsandbox true -sandboxname "$(Build.SourceBranchName)" -deleteincompletescan 2 -teams "$(veracodeTeams)"
-      fi
+- powershell: |
+    $branch = "$(Build.SourceBranchName)"
+    if ($branch -eq "main" -or $branch -eq "master") {
+      java -jar veracode-wrapper.jar -vid $(VERACODE_API_KEY_ID) -vkey $(VERACODE_API_KEY_SECRET) -action uploadandscan -appname "$(Build.DefinitionName)" -createprofile true -version $(build.buildNumber) -filepath $(caminhoPacote) -deleteincompletescan 2 -teams "$(veracodeTeams)"
+    } else {
+      java -jar veracode-wrapper.jar -vid $(VERACODE_API_KEY_ID) -vkey $(VERACODE_API_KEY_SECRET) -action uploadandscan -appname "$(Build.DefinitionName)" -createprofile true -version $(build.buildNumber) -filepath $(caminhoPacote) -createsandbox true -sandboxname "$(Build.SourceBranchName)" -deleteincompletescan 2 -teams "$(veracodeTeams)"
+    }
   displayName: 'Veracode U&S'
   continueOnError: true
