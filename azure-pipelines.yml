@@ -1,9 +1,3 @@
-# Python package
-# Create and test a Python package on multiple Python versions.
-# Add steps that analyze code, save the dist with the build record,
-# publish to a PyPI-compatible index, and more:
-# https://docs.microsoft.com/azure/devops/pipelines/languages/python
-
 trigger:
 - master
 
@@ -14,235 +8,177 @@ variables:
 - name: veracodeTeams
   value: 'DEMOs'
 
-pool:
-  vmImage: 'windows-latest'
+stages:
+- stage: Veracode
+  displayName: Veracode
+  jobs:
+  - job: Veracode
+    pool:
+      vmImage: 'windows-latest'
+    steps:
+    - task: PowerShell@2
+      displayName: 'Preparar pacote Veracode unificado'
+      inputs:
+        targetType: 'inline'
+        script: |
+          $ErrorActionPreference = "Stop"
 
-steps:
-- task: UsePythonVersion@0
-  displayName: 'Use Python 3.10'
-  inputs:
-    versionSpec: '3.10'
-    addToPath: true
-    architecture: 'x64'
+          $sourcePath = (Get-Location).Path
+          $destPath = "$(caminhoPacote)"
+          $destDir = Split-Path -Path $destPath -Parent
 
-- script: |
-    python -m pip install --upgrade pip
-    pip install -r requirements.txt
-  displayName: 'Install dependencies'
-
-- task: PowerShell@2
-  displayName: 'Preparar pacote Veracode unificado (ZIP otimizado)'
-  inputs:
-    targetType: 'inline'
-    script: |
-      $ErrorActionPreference = "Stop"
-
-      $sourcePath = (Get-Location).Path
-      $destPath = "$(caminhoPacote)"
-      $destDir = Split-Path -Path $destPath -Parent
-
-      if (-not [string]::IsNullOrWhiteSpace($destDir) -and -not (Test-Path -LiteralPath $destDir)) {
-        New-Item -Path $destDir -ItemType Directory -Force | Out-Null
-      }
-
-      if (Test-Path -LiteralPath $destPath) {
-        Remove-Item -LiteralPath $destPath -Force
-      }
-
-      $tempDir = Join-Path $env:TEMP ("VeracodeZip_" + [guid]::NewGuid().ToString())
-      New-Item -Path $tempDir -ItemType Directory -Force | Out-Null
-
-      $includePatterns = @(
-        '*.py', '*.html', '*.htm', '*.asp', '*.cjs', '*.css', '*.ehtml', '*.es', '*.es6',
-        '*.handlebars', '*.hbs', '*.hjs', '*.js', '*.jsx', '*.json', '*.jsp', '*.jspx',
-        '*.java', '*.map', '*.mjs', '*.mustache', '*.ts', '*.tsx', '*.vue', '*.xhtml',
-        '*.lock', '*.module', '*.inc', '*.profile', '*.install', '*.engine', '*.theme',
-        '*.php', '*.php4', '*.php5', '*.php7', '*.phtml', '*.txt',
-        'pyproject.toml', 'Pipfile', 'Pipfile.lock', 'composer.lock',
-        '*.cs', '*.cshtml', '*.razor', '*.csproj', '*.sln', '*.slnx', '*.props', '*.targets',
-        '*.config', '*.deps.json', '*.asset.json',
-        '*.cob', '*.cbl', '*.cobol', '*.pco', '*.cpy',
-        '*.cls', '*.trg', '*.tgr', '*.trigger', '*.pks', '*.pkb', '*.vfp', '*.cmp',
-        '*.component', '*.evt', '*.app', '*.page', '*.fnc', '*.pck', '*.pls', '*.prc',
-        '*.sql', '*.tpb', '*.tps', '*.vw',
-        '*.bas', '*.frm', '*.frx', '*.ctl', '*.ctx', '*.vbp', '*.vbg', '*.vb', '*.vbs',
-        '*.asa', '*.grp', '*.ocx',
-        '*.rpg', '*.rpg4', '*.rpgle', '*.pf', '*.lf', '*.dspf', '*.prt', '*.icf',
-        '*.sc', '*.scala', '*.groovy', '*.gvy', '*.gy', '*.gsh',
-        '*.pl', '*.pm', '*.plx', '*.pl5', '*.cgi', '*.go',
-        'go.mod', 'go.sum', 'veracode.json'
-      )
-
-      $excludeDirsRegex = '\\(node_modules|\.git|dist|bin|obj|packages|\.vscode|\.idea|test|tests|__tests__)\\'
-      $excludeTestFilesRegex = '(_test\.|_spec\.|Test\.|Tests\.)'
-
-      Write-Host "Diretorio base: $sourcePath"
-      Write-Host "Destino do ZIP: $destPath"
-
-      $matchedFiles = @(
-        Get-ChildItem -LiteralPath $sourcePath -File -Recurse | Where-Object {
-          if ($_.FullName -match $excludeDirsRegex) { return $false }
-          if ($_.Name -match $excludeTestFilesRegex) { return $false }
-
-          foreach ($pat in $includePatterns) {
-            if ($_.Name -like $pat) { return $true }
+          if (-not [string]::IsNullOrWhiteSpace($destDir) -and -not (Test-Path -LiteralPath $destDir)) {
+            New-Item -Path $destDir -ItemType Directory -Force | Out-Null
           }
-          return $false
-        }
-      )
 
-      Write-Host "Arquivos selecionados para o ZIP: $($matchedFiles.Count)"
-      foreach ($file in $matchedFiles) {
-        $relPath = $file.FullName.Substring($sourcePath.Length).TrimStart('\')
-        $sizeKB = [math]::Round($file.Length / 1KB, 2)
-        Write-Host "  + $relPath ($sizeKB KB)"
+          if (Test-Path -LiteralPath $destPath) {
+            Remove-Item -LiteralPath $destPath -Force
+          }
 
-        $targetFile = Join-Path $tempDir $relPath
-        $targetParent = Split-Path -Path $targetFile -Parent
-        if (-not (Test-Path -LiteralPath $targetParent)) {
-          New-Item -Path $targetParent -ItemType Directory -Force | Out-Null
-        }
-        Copy-Item -LiteralPath $file.FullName -Destination $targetFile -Force
-      }
+          $tempDir = Join-Path $env:TEMP ("VeracodeZip_" + [guid]::NewGuid().ToString())
+          New-Item -Path $tempDir -ItemType Directory -Force | Out-Null
 
-      Add-Type -AssemblyName System.IO.Compression.FileSystem
-      [System.IO.Compression.ZipFile]::CreateFromDirectory($tempDir, $destPath, [System.IO.Compression.CompressionLevel]::Optimal, $false)
-      Remove-Item -LiteralPath $tempDir -Recurse -Force
+          $includePatterns = @(
+            '*.py', '*.html', '*.htm', '*.asp', '*.cjs', '*.css', '*.ehtml', '*.es', '*.es6',
+            '*.handlebars', '*.hbs', '*.hjs', '*.js', '*.jsx', '*.json', '*.jsp', '*.jspx',
+            '*.java', '*.map', '*.mjs', '*.mustache', '*.ts', '*.tsx', '*.vue', '*.xhtml',
+            '*.lock', '*.module', '*.inc', '*.profile', '*.install', '*.engine', '*.theme',
+            '*.php', '*.php4', '*.php5', '*.php7', '*.phtml', '*.txt',
+            'pyproject.toml', 'Pipfile', 'Pipfile.lock', 'composer.lock',
+            '*.cs', '*.cshtml', '*.razor', '*.csproj', '*.sln', '*.slnx', '*.props', '*.targets',
+            '*.config', '*.deps.json', '*.asset.json',
+            '*.cob', '*.cbl', '*.cobol', '*.pco', '*.cpy',
+            '*.cls', '*.trg', '*.tgr', '*.trigger', '*.pks', '*.pkb', '*.vfp', '*.cmp',
+            '*.component', '*.evt', '*.app', '*.page', '*.fnc', '*.pck', '*.pls', '*.prc',
+            '*.sql', '*.tpb', '*.tps', '*.vw',
+            '*.bas', '*.frm', '*.frx', '*.ctl', '*.ctx', '*.vbp', '*.vbg', '*.vb', '*.vbs',
+            '*.asa', '*.grp', '*.ocx',
+            '*.rpg', '*.rpg4', '*.rpgle', '*.pf', '*.lf', '*.dspf', '*.prt', '*.icf',
+            '*.sc', '*.scala', '*.groovy', '*.gvy', '*.gy', '*.gsh',
+            '*.pl', '*.pm', '*.plx', '*.pl5', '*.cgi', '*.go',
+            'go.mod', 'go.sum', 'veracode.json'
+          )
 
-      Write-Host ""
-      Write-Host "ZIP criado:"
-      Get-Item -LiteralPath $destPath | Select-Object FullName, @{Name="SizeMB";Expression={[math]::Round($_.Length / 1MB, 2)}}, @{Name="SizeKB";Expression={[math]::Round($_.Length / 1KB, 2)}}
+          $excludeDirsRegex = '\\(node_modules|\.git|dist|bin|obj|packages|\.vscode|\.idea|test|tests|__tests__)\\'
+          $excludeTestFilesRegex = '(_test\.|_spec\.|Test\.|Tests\.)'
 
-- task: PowerShell@2
-  displayName: 'Download Veracode Wrapper'
-  inputs:
-    targetType: 'inline'
-    script: |
-      $ErrorActionPreference = "Stop"
-      [xml]$meta = Invoke-RestMethod -Uri "https://repo1.maven.org/maven2/com/veracode/vosp/api/wrappers/vosp-api-wrappers-java/maven-metadata.xml"
-      $latestVersion = $meta.metadata.versioning.latest
-      $jarUrl = "https://repo1.maven.org/maven2/com/veracode/vosp/api/wrappers/vosp-api-wrappers-java/$latestVersion/vosp-api-wrappers-java-$latestVersion.jar"
-      Invoke-WebRequest -Uri $jarUrl -OutFile "veracode-wrapper.jar"
+          $matchedFiles = @(
+            Get-ChildItem -LiteralPath $sourcePath -File -Recurse | Where-Object {
+              if ($_.FullName -match $excludeDirsRegex) { return $false }
+              if ($_.Name -match $excludeTestFilesRegex) { return $false }
 
-- task: PowerShell@2
-  displayName: 'Veracode - limpar sandbox'
-  condition: and(succeeded(), ne(variables['Build.SourceBranchName'], 'main'))
-  inputs:
-    targetType: 'inline'
-    script: |
-      $ErrorActionPreference = "Stop"
+              foreach ($pat in $includePatterns) {
+                if ($_.Name -like $pat) { return $true }
+              }
+              return $false
+            }
+          )
 
-      $appName = "$(veracodeAppProfile)"
-      $appListXml = java -jar veracode-wrapper.jar -vid "$(APIID)" -vkey "$(APIKEY)" -action getapplist
-      [xml]$appsDoc = $appListXml
+          Write-Host "Arquivos selecionados para o ZIP: $($matchedFiles.Count)"
+          foreach ($file in $matchedFiles) {
+            $relPath = $file.FullName.Substring($sourcePath.Length).TrimStart('\')
+            $targetFile = Join-Path $tempDir $relPath
+            $targetParent = Split-Path -Path $targetFile -Parent
+            if (-not (Test-Path -LiteralPath $targetParent)) {
+              New-Item -Path $targetParent -ItemType Directory -Force | Out-Null
+            }
+            Copy-Item -LiteralPath $file.FullName -Destination $targetFile -Force
+          }
 
-      $appNode = $appsDoc.SelectSingleNode("//app[@app_name='$appName']")
-      if ($null -eq $appNode) {
-        Write-Host "Aplicacao nao encontrada; pulando limpeza de sandbox"
-        exit 0
-      }
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          [System.IO.Compression.ZipFile]::CreateFromDirectory($tempDir, $destPath, [System.IO.Compression.CompressionLevel]::Optimal, $false)
+          Remove-Item -LiteralPath $tempDir -Recurse -Force
 
-      $appId = $appNode.app_id
-      Write-Host "Aplicacao: $appName"
-      Write-Host "App ID: $appId"
+          Write-Host "ZIP criado em: $destPath"
 
-      $sandboxXml = java -jar veracode-wrapper.jar -vid "$(APIID)" -vkey "$(APIKEY)" -action getsandboxlist -appid $appId
-      Write-Output $sandboxXml
+    - task: PowerShell@2
+      displayName: 'Download Veracode Wrapper'
+      inputs:
+        targetType: 'inline'
+        script: |
+          $ErrorActionPreference = "Stop"
+          [xml]$meta = Invoke-RestMethod -Uri "https://repo1.maven.org/maven2/com/veracode/vosp/api/wrappers/vosp-api-wrappers-java/maven-metadata.xml"
+          $latestVersion = $meta.metadata.versioning.latest
+          $jarUrl = "https://repo1.maven.org/maven2/com/veracode/vosp/api/wrappers/vosp-api-wrappers-java/$latestVersion/vosp-api-wrappers-java-$latestVersion.jar"
+          Invoke-WebRequest -Uri $jarUrl -OutFile "veracode-wrapper.jar"
 
-      [xml]$sbDoc = $sandboxXml
-      $sandboxes = @($sbDoc.SelectNodes("//sandbox"))
-      Write-Host "Quantidade de sandboxes: $($sandboxes.Count)"
+    - task: PowerShell@2
+      displayName: 'Veracode U&S'
+      continueOnError: true
+      inputs:
+        targetType: 'inline'
+        script: |
+          $branch = "$(Build.SourceBranchName)"
+          if ($branch -eq "main" -or $branch -eq "master") {
+            java -jar veracode-wrapper.jar `
+              -vid "$(APIID)" `
+              -vkey "$(APIKEY)" `
+              -action uploadandscan `
+              -appname "$(veracodeAppProfile)" `
+              -createprofile true `
+              -version "$(Build.BuildNumber)" `
+              -filepath "$(caminhoPacote)" `
+              -deleteincompletescan 2 `
+              -teams "$(veracodeTeams)"
+          } else {
+            java -jar veracode-wrapper.jar `
+              -vid "$(APIID)" `
+              -vkey "$(APIKEY)" `
+              -action uploadandscan `
+              -appname "$(veracodeAppProfile)" `
+              -createprofile true `
+              -version "$(Build.BuildNumber)" `
+              -filepath "$(caminhoPacote)" `
+              -createsandbox true `
+              -sandboxname "$branch" `
+              -deleteincompletescan 2 `
+              -teams "$(veracodeTeams)"
+          }
 
-      if ($sandboxes.Count -ge 3) {
-        $oldest = $sandboxes | Sort-Object { $_.last_modified } | Select-Object -First 1
-        if ($null -eq $oldest -or [string]::IsNullOrWhiteSpace($oldest.sandbox_id)) {
-          Write-Error "Sandbox mais antiga nao encontrada"
-          exit 1
-        }
+    - task: PowerShell@2
+      displayName: 'Download Veracode CLI'
+      inputs:
+        targetType: 'inline'
+        script: |
+          $ErrorActionPreference = "Stop"
+          Set-ExecutionPolicy AllSigned -Scope Process -Force
+          $ProgressPreference = "silentlyContinue"
+          Invoke-Expression ((New-Object System.Net.WebClient).DownloadString('https://tools.veracode.com/veracode-cli/install.ps1'))
 
-        Write-Host "Removendo sandbox ID: $($oldest.sandbox_id)"
-        java -jar veracode-wrapper.jar -vid "$(APIID)" -vkey "$(APIKEY)" -action deletesandbox -sandboxid $oldest.sandbox_id
-      } else {
-        Write-Host "Nenhuma limpeza necessaria."
-      }
+    - script: |
+        curl -sSL https://download.srcclr.com/ci.sh | bash -s -- scan --allow-dirty --recursive
+      displayName: 'Veracode SCA'
+      continueOnError: true
 
-- task: PowerShell@2
-  displayName: 'Veracode U&S'
-  inputs:
-    targetType: 'inline'
-    script: |
-      $ErrorActionPreference = "Stop"
+    - task: PowerShell@2
+      displayName: 'Veracode IaC'
+      continueOnError: true
+      inputs:
+        targetType: 'inline'
+        script: |
+          $originalDir = (Get-Location).Path
+          $parentDir = Split-Path -Path $originalDir -Parent
+          $originalName = Split-Path -Path $originalDir -Leaf
+          $pipelineDir = Join-Path $parentDir "$(Build.DefinitionName)"
 
-      if ("$(Build.SourceBranchName)" -eq "catatau") {
-        java -jar veracode-wrapper.jar `
-          -vid "$(APIID)" `
-          -vkey "$(APIKEY)" `
-          -action uploadandscan `
-          -appname "$(veracodeAppProfile)" `
-          -createprofile true `
-          -version "$(Build.BuildNumber)" `
-          -filepath "$(caminhoPacote)" `
-          -teams "$(veracodeTeams)" `
-          -deleteincompletescan 2
-      } else {
-        java -jar veracode-wrapper.jar `
-          -vid "$(APIID)" `
-          -vkey "$(APIKEY)" `
-          -action uploadandscan `
-          -appname "$(veracodeAppProfile)" `
-          -createprofile true `
-          -version "$(Build.BuildNumber)" `
-          -filepath "$(caminhoPacote)" `
-          -createsandbox true `
-          -sandboxname "$(Build.SourceBranchName).$(Build.BuildNumber)" `
-          -teams "$(veracodeTeams)" `
-          -deleteincompletescan 2
-      }
+          if ($originalDir -ne $pipelineDir) {
+            if (Test-Path -LiteralPath $pipelineDir) { Remove-Item -LiteralPath $pipelineDir -Recurse -Force }
+            Move-Item -LiteralPath $originalDir -Destination $pipelineDir
+            Set-Location -Path $pipelineDir
+          }
 
-- task: PowerShell@2
-  displayName: 'Download Veracode CLI'
-  inputs:
-    targetType: 'inline'
-    script: |
-      $ErrorActionPreference = "Stop"
-      Invoke-WebRequest -Uri "https://tools.veracode.com/veracode-cli/veracode-cli_latest_windows_x86_64.zip" -OutFile "veracode-cli.zip"
-      Expand-Archive -Path "veracode-cli.zip" -DestinationPath ".\veracode-cli" -Force
-      Write-Host "##vso[task.prependpath]$(System.DefaultWorkingDirectory)\veracode-cli"
+          Write-Host "pasta: $((Get-Location).Path)"
+          veracode.exe scan --type directory --source "$((Get-Location).Path)" --format table
 
-- script: |
-    curl -sSL https://download.srcclr.com/ci.sh | bash -s -- scan --appname="$(veracodeAppProfile)" --update-advisor --allow-dirty --recursive
-  displayName: 'Veracode SCA'
-  continueOnError: true
+          if ((Get-Location).Path -ne $originalDir) {
+            Set-Location -Path $parentDir
+            if (Test-Path -LiteralPath $pipelineDir) {
+              Move-Item -LiteralPath $pipelineDir -Destination $originalDir
+            }
+            Set-Location -Path $originalDir
+          }
 
-- task: PowerShell@2
-  displayName: 'Veracode IaC'
-  continueOnError: true
-  inputs:
-    targetType: 'inline'
-    script: |
-      $originalDir = (Get-Location).Path
-      $parentDir = Split-Path -Path $originalDir -Parent
-      $originalName = Split-Path -Path $originalDir -Leaf
-      $pipelineDir = Join-Path $parentDir "$(Build.DefinitionName)"
-
-      if ($originalDir -ne $pipelineDir) {
-        if (Test-Path -LiteralPath $pipelineDir) { Remove-Item -LiteralPath $pipelineDir -Recurse -Force }
-        Move-Item -LiteralPath $originalDir -Destination $pipelineDir
-        Set-Location -Path $pipelineDir
-      }
-
-      Write-Host "pasta: $((Get-Location).Path)"
-      veracode.exe scan --type directory --source "$((Get-Location).Path)" --format table
-
-      if ((Get-Location).Path -ne $originalDir) {
-        Set-Location -Path $parentDir
-        if (Test-Path -LiteralPath $pipelineDir) {
-          Move-Item -LiteralPath $pipelineDir -Destination $originalDir
-        }
-        Set-Location -Path $originalDir
-      }
-
-- script: |
-    veracode.exe static scan "$(caminhoPacote)"
-  displayName: 'Veracode SAST'
-  continueOnError: true
+    - script: |
+        veracode.exe static scan "$(caminhoPacote)"
+      displayName: 'Veracode SAST'
+      continueOnError: true
