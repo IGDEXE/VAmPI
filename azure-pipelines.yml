@@ -12,7 +12,6 @@ pool:
   vmImage: 'windows-latest'
 
 steps:
-# 1. Empacota os arquivos filtrados em ZIP e registra no log cada arquivo incluído + tamanho final
 - task: PowerShell@2
   displayName: 'Preparar pacote Veracode unificado'
   inputs:
@@ -96,7 +95,6 @@ steps:
       Write-Host "ZIP criado:"
       Get-Item -LiteralPath $destPath | Select-Object FullName, @{Name="SizeMB";Expression={[math]::Round($_.Length / 1MB, 2)}}, @{Name="SizeKB";Expression={[math]::Round($_.Length / 1KB, 2)}}
 
-# 2. Baixa o Java API Wrapper via curl.exe no Windows
 - task: PowerShell@2
   displayName: 'Download Veracode Wrapper'
   inputs:
@@ -105,12 +103,8 @@ steps:
       $ErrorActionPreference = "Stop"
       $xml = curl.exe -sL "https://repo1.maven.org/maven2/com/veracode/vosp/api/wrappers/vosp-api-wrappers-java/maven-metadata.xml"
       $latestVersion = ([xml]$xml).metadata.versioning.latest
-      if ([string]::IsNullOrWhiteSpace($latestVersion)) {
-        throw "Não foi possível obter a versão mais recente em maven-metadata.xml."
-      }
       curl.exe -fsSL -o "veracode-wrapper.jar" "https://repo1.maven.org/maven2/com/veracode/vosp/api/wrappers/vosp-api-wrappers-java/$latestVersion/vosp-api-wrappers-java-$latestVersion.jar"
 
-# 3. Executa uploadandscan no perfil/sandbox da equipe DEMOs (sem limpeza de sandbox)
 - task: PowerShell@2
   displayName: 'Veracode U&S'
   continueOnError: true
@@ -118,7 +112,7 @@ steps:
     targetType: 'inline'
     script: |
       $branch = "$(Build.SourceBranchName)"
-      if ($branch -eq "catatau") {
+      if ($branch -eq "main" -or $branch -eq "master") {
         java -jar veracode-wrapper.jar `
           -vid "$(APIID)" `
           -vkey "$(APIKEY)" `
@@ -144,7 +138,6 @@ steps:
           -deleteincompletescan 2
       }
 
-# 4. Instala a Veracode CLI no Windows via PowerShell conforme documentação oficial
 - task: PowerShell@2
   displayName: 'Download Veracode CLI'
   inputs:
@@ -154,32 +147,3 @@ steps:
       Set-ExecutionPolicy AllSigned -Scope Process -Force
       $ProgressPreference = "silentlyContinue"
       Invoke-Expression ((New-Object System.Net.WebClient).DownloadString('https://tools.veracode.com/veracode-cli/install.ps1'))
-
-# 5. Executa os comandos da Veracode CLI no diretório de instalação
-- task: PowerShell@2
-  displayName: 'Veracode CLI Scan'
-  continueOnError: true
-  inputs:
-    targetType: 'inline'
-    script: |
-      $cliPath = Get-Command "veracode" -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source -First 1
-      if (-not $cliPath) {
-        $cliPath = Get-ChildItem -Path "$(System.DefaultWorkingDirectory)", "$env:LOCALAPPDATA", "$env:ProgramFiles" -Filter "veracode*" -File -Recurse -ErrorAction SilentlyContinue |
-          Where-Object { $_.BaseName -eq "veracode" } |
-          Select-Object -ExpandProperty FullName -First 1
-      }
-
-      if (-not $cliPath) {
-        throw "Executável da Veracode CLI não encontrado após a instalação."
-      }
-
-      $cliDir = Split-Path -Path $cliPath -Parent
-      $cliExe = Split-Path -Path $cliPath -Leaf
-      Push-Location -LiteralPath $cliDir
-      try {
-        .\$cliExe version
-        .\$cliExe scan --type directory --source "$(Get-Location).Path" --format table
-        .\$cliExe static scan "$(caminhoPacote)"
-      } finally {
-        Pop-Location
-      }
