@@ -108,35 +108,11 @@ steps:
       }
       curl.exe -fsSL -o "veracode-wrapper.jar" "https://repo1.maven.org/maven2/com/veracode/vosp/api/wrappers/vosp-api-wrappers-java/$latestVersion/vosp-api-wrappers-java-$latestVersion.jar"
 
-- task: PowerShell@2
+- script: |
+    if [[ "$(Build.SourceBranchName)" == "main" || "$(Build.SourceBranchName)" == "master" ]]; then
+        java -jar veracode-wrapper.jar -vid $(VERACODE_API_KEY_ID) -vkey $(VERACODE_API_KEY_SECRET) -action uploadandscan -appname "$(Build.DefinitionName)" -createprofile true  -version $(build.buildNumber) -filepath $(caminhoPacote) -deleteincompletescan 2 -teams "$(veracodeTeams)"
+      else
+        java -jar veracode-wrapper.jar -vid $(VERACODE_API_KEY_ID) -vkey $(VERACODE_API_KEY_SECRET) -action uploadandscan -appname "$(Build.DefinitionName)" -createprofile true  -version $(build.buildNumber) -filepath $(caminhoPacote) -createsandbox true -sandboxname "$(Build.SourceBranchName)" -deleteincompletescan 2 -teams "$(veracodeTeams)"
+      fi
   displayName: 'Veracode U&S'
   continueOnError: true
-  inputs:
-    targetType: 'inline'
-    script: |
-      $branch = "$(Build.SourceBranchName)"
-      if ($branch -eq "catatau") {
-        java -jar veracode-wrapper.jar `
-          -vid "$(APIID)" `
-          -vkey "$(APIKEY)" `
-          -action uploadandscan `
-          -appname "$(veracodeAppProfile)" `
-          -createprofile true `
-          -version "$(Build.BuildNumber)" `
-          -filepath "$(caminhoPacote)" `
-          -teams "$(veracodeTeams)" `
-          -deleteincompletescan 2
-      } else {
-        java -jar veracode-wrapper.jar `
-          -vid "$(APIID)" `
-          -vkey "$(APIKEY)" `
-          -action uploadandscan `
-          -appname "$(veracodeAppProfile)" `
-          -createprofile true `
-          -version "$(Build.BuildNumber)" `
-          -filepath "$(caminhoPacote)" `
-          -createsandbox true `
-          -sandboxname "$branch.$(Build.BuildNumber)" `
-          -teams "$(veracodeTeams)" `
-          -deleteincompletescan 2
-      }
