@@ -111,9 +111,9 @@ steps:
 - powershell: |
     $branch = "$(Build.SourceBranchName)"
     if ($branch -eq "main" -or $branch -eq "master") {
-      java -jar veracode-wrapper.jar -vid $(VERACODE_API_KEY_ID) -vkey $(VERACODE_API_KEY_SECRET) -action uploadandscan -appname "$(Build.DefinitionName)" -createprofile true -version $(build.buildNumber) -filepath $(caminhoPacote) -deleteincompletescan 2 -teams "$(veracodeTeams)"
+      java -jar veracode-wrapper.jar -vid "$(APIID)" -vkey "$(APIKEY)" -action uploadandscan -appname "$(veracodeAppProfile)" -createprofile true -version "$(Build.BuildNumber)" -filepath "$(caminhoPacote)" -deleteincompletescan 2 -teams "$(veracodeTeams)"
     } else {
-      java -jar veracode-wrapper.jar -vid $(VERACODE_API_KEY_ID) -vkey $(VERACODE_API_KEY_SECRET) -action uploadandscan -appname "$(Build.DefinitionName)" -createprofile true -version $(build.buildNumber) -filepath $(caminhoPacote) -createsandbox true -sandboxname "$(Build.SourceBranchName)" -deleteincompletescan 2 -teams "$(veracodeTeams)"
+      java -jar veracode-wrapper.jar -vid "$(APIID)" -vkey "$(APIKEY)" -action uploadandscan -appname "$(veracodeAppProfile)" -createprofile true -version "$(Build.BuildNumber)" -filepath "$(caminhoPacote)" -createsandbox true -sandboxname "$branch" -deleteincompletescan 2 -teams "$(veracodeTeams)"
     }
   displayName: 'Veracode U&S'
   continueOnError: true
